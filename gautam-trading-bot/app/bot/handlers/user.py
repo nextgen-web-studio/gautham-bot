@@ -20,13 +20,16 @@ async def cmd_start(message: Message):
     user = message.from_user
     source = message.text.replace("/start", "").strip()
     
+    from datetime import datetime
+    now_iso = datetime.utcnow().isoformat()
+    
     user_data = {
         "telegram_id": user.id,
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
         "language_code": user.language_code,
-        "last_active_at": "now()"
+        "last_active_at": now_iso
     }
     if source:
         user_data["source"] = source
@@ -35,7 +38,7 @@ async def cmd_start(message: Message):
     if not res.data:
         supabase.table("users").insert(user_data).execute()
     else:
-        supabase.table("users").update({"last_active_at": "now()"}).eq("telegram_id", user.id).execute()
+        supabase.table("users").update({"last_active_at": now_iso}).eq("telegram_id", user.id).execute()
 
     log_event(user.id, "START", {"source": source})
     
@@ -84,7 +87,9 @@ async def process_id(message: Message, state: FSMContext):
         
     log_event(message.from_user.id, "ID_VALID", {"input": user_id})
     log_event(message.from_user.id, "ID_SUBMITTED")
-    supabase.table("users").update({"quotex_id": user_id, "quotex_id_submitted_at": "now()"}).eq("telegram_id", message.from_user.id).execute()
+    from datetime import datetime
+    now_iso = datetime.utcnow().isoformat()
+    supabase.table("users").update({"quotex_id": user_id, "quotex_id_submitted_at": now_iso}).eq("telegram_id", message.from_user.id).execute()
     supabase.table("user_reminders").update({"enabled": False}).eq("user_id", message.from_user.id).execute()
     
     await state.clear()
