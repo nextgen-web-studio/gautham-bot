@@ -3,7 +3,7 @@ from app.config import settings
 
 client = AsyncOpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
 # Default model, you can override depending on the provider
-MODEL = "gemini-1.5-flash" # Or compatible
+MODEL = "gemini-3.5-flash" # Or compatible
 
 async def _call_ai(system_prompt: str, user_prompt: str) -> str:
     try:
