@@ -18,8 +18,8 @@ dp = Dispatcher()
 dp.message.middleware(AdminMiddleware())
 dp.callback_query.middleware(AdminMiddleware())
 
-dp.include_router(admin.router)
 dp.include_router(admin_settings.router)
+dp.include_router(admin.router)
 dp.include_router(user.router)
 
 @dp.errors()
