@@ -29,3 +29,7 @@ async def admin_dashboard(callback: CallbackQuery, is_admin: bool):
     text = f"📊 GAUTAM TRADING DASHBOARD\n\n👥 Total Users: {users_count}\n🆔 IDs Submitted: {ids_count}"
     await callback.message.edit_text(text, reply_markup=back_to_admin_kb())
     await callback.answer()
+@router.callback_query(F.data.startswith("admin_"))
+async def admin_placeholders(callback: CallbackQuery, is_admin: bool):
+    if not is_admin: return
+    await callback.answer("?? This section is currently under development!", show_alert=True)
