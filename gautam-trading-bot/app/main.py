@@ -21,6 +21,16 @@ dp.callback_query.middleware(AdminMiddleware())
 dp.include_router(admin.router)
 dp.include_router(user.router)
 
+@dp.errors()
+async def global_error_handler(update: Update, exception: Exception):
+    import traceback
+    err_msg = traceback.format_exc()
+    try:
+        await bot.send_message(settings.initial_admin_telegram_id, f"AIOGRAM CRASH:\n{exception}\n\n{err_msg[:3000]}")
+    except:
+        pass
+    return True
+
 scheduler = AsyncIOScheduler()
 
 async def reminder_job():
@@ -65,9 +75,18 @@ async def webhook_handler(request: Request):
     if settings.telegram_webhook_secret and secret_token != settings.telegram_webhook_secret:
         return {"status": "unauthorized"}
         
-    update_data = await request.json()
-    update = Update(**update_data)
-    await dp.feed_update(bot, update)
+    try:
+        update_data = await request.json()
+        update = Update(**update_data)
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        import traceback
+        err_msg = traceback.format_exc()
+        try:
+            # Try to send the error directly to the admin
+            await bot.send_message(settings.initial_admin_telegram_id, f"CRASH: {e}\n\n{err_msg[:3000]}")
+        except:
+            pass
     return {"status": "ok"}
 
 @app.get("/health")
