@@ -1,19 +1,83 @@
-import logging
+import os
 import asyncio
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from bot import bot, dp
+import logging
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+from dotenv import load_dotenv
+from aiohttp import web
 
-logging.basicConfig(level=logging.INFO)
+from bot_logic import handle_message
+from bot_polling import start_bot_command_polling
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    asyncio.create_task(dp.start_polling(bot))
-    yield
-    await bot.session.close()
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(lifespan=lifespan)
+load_dotenv()
+API_ID = os.getenv("API_ID")
+API_HASH = os.getenv("API_HASH")
+TARGET_CHANNEL_ID = os.getenv("TARGET_CHANNEL_ID")
+STRING_SESSION = os.getenv("TELEGRAM_STRING_SESSION")
+PORT = int(os.getenv("PORT", 8080))
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+async def handle_ping(request):
+    """Dummy web server endpoint to keep Render awake."""
+    return web.Response(text="Trading Bot is alive and running!")
+
+async def start_web_server():
+    """Starts the dummy web server."""
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    logger.info(f"Dummy web server listening on port {PORT}...")
+
+async def main():
+    if not API_ID or not API_HASH:
+        logger.error("API_ID or API_HASH not found in .env file.")
+        return
+
+    # Start the dummy web server to keep Render awake
+    await start_web_server()
+
+    # Determine which session storage to use
+    if STRING_SESSION:
+        logger.info("Using StringSession for ephemeral cloud deployment (Render)...")
+        session = StringSession(STRING_SESSION)
+    else:
+        logger.info("Using local SQLite session (trading_bot.session)...")
+        session = 'trading_bot'
+
+    client = TelegramClient(session, API_ID, API_HASH)
+
+    def get_target_chats():
+        if not TARGET_CHANNEL_ID:
+            return None
+        try:
+            return [int(c.strip()) for c in TARGET_CHANNEL_ID.split(',') if c.strip()]
+        except ValueError:
+            logger.error("Invalid TARGET_CHANNEL_ID format. Expected integers separated by commas.")
+            return None
+
+    target_chats = get_target_chats()
+
+    @client.on(events.NewMessage(chats=target_chats))
+    async def message_handler(event):
+        await handle_message(event, client)
+
+    logger.info("Starting Telethon Userbot...")
+    await client.start()
+
+    # Launch bot command polling as a background task (read-only, isolated from trading)
+    asyncio.create_task(start_bot_command_polling())
+
+    logger.info("Bot is running and listening for messages.")
+    await client.run_until_disconnected()
+
+if __name__ == "__main__":
+    asyncio.run(main())
