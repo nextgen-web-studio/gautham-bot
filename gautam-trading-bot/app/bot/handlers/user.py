@@ -106,3 +106,7 @@ async def stop_reminders(callback: CallbackQuery):
     supabase.table("user_reminders").update({"enabled": False}).eq("user_id", callback.from_user.id).execute()
     await callback.message.edit_text("Reminders stopped.\n\nYou can continue whenever you're ready.")
     await callback.answer()
+
+@router.message()
+async def catch_all(message: Message):
+    await message.answer(f"DEBUG: Message received: {message.text}")
