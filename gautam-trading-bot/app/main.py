@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from app.config.settings import settings
-from app.bot.handlers import user, admin, admin_settings
+from app.bot.handlers import user, admin, admin_settings, admin_proof, admin_users
 from app.bot.middlewares.admin import AdminMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.database.client import supabase, get_setting
@@ -19,6 +19,8 @@ dp.message.middleware(AdminMiddleware())
 dp.callback_query.middleware(AdminMiddleware())
 
 dp.include_router(admin_settings.router)
+dp.include_router(admin_proof.router)
+dp.include_router(admin_users.router)
 dp.include_router(admin.router)
 dp.include_router(user.router)
 
