@@ -43,7 +43,8 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     
     if settings.backend_url:
-        webhook_url = f"{settings.backend_url}/webhook"
+        b_url = settings.backend_url.rstrip('/')
+        webhook_url = f"{b_url}/webhook"
         await bot.set_webhook(url=webhook_url, secret_token=settings.telegram_webhook_secret)
         logging.info(f"Webhook set to {webhook_url}")
     else:
