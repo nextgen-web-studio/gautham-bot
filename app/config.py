@@ -4,7 +4,7 @@ from typing import List
 class Settings(BaseSettings):
     bot_token: str
     ai_api_key: str
-    ai_base_url: str = "https://api.openai.com/v1"
+    ai_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     database_url: str = "sqlite+aiosqlite:///./test.db" # Default fallback
     redis_url: str = ""
     webhook_url: str = ""
