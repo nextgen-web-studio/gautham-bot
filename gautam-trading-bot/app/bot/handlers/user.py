@@ -17,46 +17,50 @@ def log_event(user_id: int, event_type: str, metadata: dict = None):
 
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    user = message.from_user
-    source = message.text.replace("/start", "").strip()
-    
-    from datetime import datetime
-    now_iso = datetime.utcnow().isoformat()
-    
-    user_data = {
-        "telegram_id": user.id,
-        "username": user.username,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "language_code": user.language_code,
-        "last_active_at": now_iso
-    }
-    if source:
-        user_data["source"] = source
+    try:
+        user = message.from_user
+        source = message.text.replace("/start", "").strip()
         
-    res = supabase.table("users").select("id").eq("telegram_id", user.id).execute()
-    if not res.data:
-        supabase.table("users").insert(user_data).execute()
-    else:
-        supabase.table("users").update({"last_active_at": now_iso}).eq("telegram_id", user.id).execute()
-
-    log_event(user.id, "START", {"source": source})
-    
-    welcome_msg = get_setting("welcome_message", "Welcome to Gautam Trading 👋").replace("\\n", "\n")
-    await message.answer(welcome_msg)
-    
-    proofs = supabase.table("proof_content").select("*").eq("enabled", True).order("sort_order").execute().data
-    for p in proofs:
-        log_event(user.id, "PROOF_VIEW", {"proof_id": p["id"]})
-        if p["content_type"] == "image":
-            await message.answer_photo(p["file_id"], caption=p.get("caption", ""))
-        elif p["content_type"] == "video":
-            await message.answer_video(p["file_id"], caption=p.get("caption", ""))
-        elif p["content_type"] == "text":
-            await message.answer(p.get("caption", ""))
+        from datetime import datetime
+        now_iso = datetime.utcnow().isoformat()
+        
+        user_data = {
+            "telegram_id": user.id,
+            "username": user.username,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "language_code": user.language_code,
+            "last_active_at": now_iso
+        }
+        if source:
+            user_data["source"] = source
             
-    public_channel = get_setting("public_channel_link", "https://t.me/yourpublicchannel")
-    await message.answer("🚀 To get started, join our public channel and create your account.", reply_markup=create_account_kb(public_channel))
+        res = supabase.table("users").select("id").eq("telegram_id", user.id).execute()
+        if not res.data:
+            supabase.table("users").insert(user_data).execute()
+        else:
+            supabase.table("users").update({"last_active_at": now_iso}).eq("telegram_id", user.id).execute()
+
+        log_event(user.id, "START", {"source": source})
+        
+        welcome_msg = get_setting("welcome_message", "Welcome to Gautam Trading 👋").replace("\\n", "\n")
+        await message.answer(welcome_msg)
+        
+        proofs = supabase.table("proof_content").select("*").eq("enabled", True).order("sort_order").execute().data
+        for p in proofs:
+            log_event(user.id, "PROOF_VIEW", {"proof_id": p["id"]})
+            if p["content_type"] == "image":
+                await message.answer_photo(p["file_id"], caption=p.get("caption", ""))
+            elif p["content_type"] == "video":
+                await message.answer_video(p["file_id"], caption=p.get("caption", ""))
+            elif p["content_type"] == "text":
+                await message.answer(p.get("caption", ""))
+                
+        public_channel = get_setting("public_channel_link", "https://t.me/yourpublicchannel")
+        await message.answer("🚀 To get started, join our public channel and create your account.", reply_markup=create_account_kb(public_channel))
+    except Exception as e:
+        import traceback
+        await message.answer(f"Bot Error:\n{e}\n\n{traceback.format_exc()}")
 
 @router.callback_query(F.data == "action_create_account")
 async def create_account(callback: CallbackQuery):
