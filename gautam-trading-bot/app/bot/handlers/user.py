@@ -39,7 +39,7 @@ async def cmd_start(message: Message):
 
     log_event(user.id, "START", {"source": source})
     
-    welcome_msg = get_setting("welcome_message", "Welcome to Gautam Trading 👋")
+    welcome_msg = get_setting("welcome_message", "Welcome to Gautam Trading 👋").replace("\\n", "\n")
     await message.answer(welcome_msg)
     
     proofs = supabase.table("proof_content").select("*").eq("enabled", True).order("sort_order").execute().data
@@ -52,7 +52,8 @@ async def cmd_start(message: Message):
         elif p["content_type"] == "text":
             await message.answer(p.get("caption", ""))
             
-    await message.answer("🚀 To get started, create your account and verify it.", reply_markup=create_account_kb())
+    public_channel = get_setting("public_channel_link", "https://t.me/yourpublicchannel")
+    await message.answer("🚀 To get started, join our public channel and create your account.", reply_markup=create_account_kb(public_channel))
 
 @router.callback_query(F.data == "action_create_account")
 async def create_account(callback: CallbackQuery):
