@@ -55,8 +55,6 @@ async def lifespan(app: FastAPI):
     yield
     
     scheduler.shutdown()
-    if settings.backend_url:
-        await bot.delete_webhook()
     await bot.session.close()
 
 app = FastAPI(lifespan=lifespan)
