@@ -13,9 +13,29 @@ class Settings(BaseSettings):
     bot_token: str = os.getenv("BOT_TOKEN", "")
     admin_telegram_ids: str = os.getenv("ADMIN_TELEGRAM_IDS", "")
     
+from contextlib import asynccontextmanager
+import asyncio
+import sys
+
+# We need to add the parent directory to sys.path if we are running from the backend directory, or just import using absolute path if we're running from the root.
+# Assuming the root is gautam-trading
+try:
+    from bot.main import bot, dp
+except ImportError:
+    import sys, os
+    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+    from bot.main import bot, dp
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start the bot polling in the background
+    asyncio.create_task(dp.start_polling(bot))
+    yield
+    # We could close the bot session here if needed
+
 settings = Settings()
 
-app = FastAPI(title="Gautam Trading Admin API")
+app = FastAPI(title="Gautam Trading Admin API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -7,6 +7,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Run the backend and bot together, or just the bot.
-# Assuming you just want to run the Telegram Bot for now:
-CMD ["python", "bot/main.py"]
+# Run the FastAPI backend, which will now automatically start the Telegram Bot in the background!
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "10000"]
