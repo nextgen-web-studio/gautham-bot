@@ -104,6 +104,17 @@ async def process_quotex_id(message: types.Message, state: FSMContext):
     quotex_id = message.text.strip()
     telegram_id = str(message.from_user.id)
     
+    # Check for duplicate Quotex ID
+    existing_res = supabase.table("users").select("telegram_id").eq("quotex_id", quotex_id).execute()
+    if existing_res.data:
+        existing_owner = existing_res.data[0]["telegram_id"]
+        if existing_owner == telegram_id:
+            await message.answer("⚠️ You have already registered this Quotex ID!")
+        else:
+            await message.answer("❌ This Quotex ID is already registered with another Telegram account.")
+        await state.clear()
+        return
+    
     # Update DB
     supabase.table("users").update({
         "quotex_id": quotex_id,
