@@ -139,9 +139,15 @@ async def admin_approve(callback: types.CallbackQuery):
     
     supabase.table("users").update({"approval_status": "approved"}).eq("telegram_id", user_id).execute()
     
+    # Fetch VIP Channel link
+    settings_res = supabase.table("bot_settings").select("setting_value").eq("setting_key", "vip_channel_link").execute()
+    vip_link = "No VIP link set by admin."
+    if settings_res.data:
+        vip_link = settings_res.data[0].get("setting_value", vip_link)
+        
     try:
         await callback.message.edit_text(callback.message.text + "\n\n✅ **APPROVED**", parse_mode="Markdown")
-        await bot.send_message(user_id, "🎉 Congratulations! Your Quotex ID has been approved. Welcome to the VIP Team!")
+        await bot.send_message(user_id, f"🎉 Approved! Join the VIP Channel here: {vip_link}")
     except: pass
     await callback.answer("User Approved")
 
@@ -154,7 +160,7 @@ async def admin_reject(callback: types.CallbackQuery):
     
     try:
         await callback.message.edit_text(callback.message.text + "\n\n❌ **REJECTED**", parse_mode="Markdown")
-        await bot.send_message(user_id, "❌ Your Quotex ID was rejected. Please ensure you registered correctly with our link, deposited the minimum amount, and try again.")
+        await bot.send_message(user_id, "❌ Rejected! Please make sure you deposited at least $50 and try again.")
     except: pass
     await callback.answer("User Rejected")
 
@@ -169,6 +175,7 @@ async def cmd_admin(message: types.Message):
         [InlineKeyboardButton(text="📢 Broadcast Message", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🔗 Edit Affiliate Link", callback_data="edit_affiliate")],
         [InlineKeyboardButton(text="📢 Edit Public Channel Link", callback_data="edit_public")],
+        [InlineKeyboardButton(text="👑 Edit VIP Channel Link", callback_data="edit_vip")],
         [InlineKeyboardButton(text="📸 Add Review Image", callback_data="add_review_img")],
         [InlineKeyboardButton(text="🗑️ Clear All Reviews", callback_data="clear_reviews")]
     ])
@@ -187,6 +194,13 @@ async def edit_pub(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminEditState.waiting_for_link)
     await state.update_data(setting_key="public_channel_link")
     await callback.message.answer("📢 Please send the new **Public Channel Link**:")
+    await callback.answer()
+    
+@dp.callback_query(F.data == "edit_vip")
+async def edit_vip(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminEditState.waiting_for_link)
+    await state.update_data(setting_key="vip_channel_link")
+    await callback.message.answer("👑 Please send the new **VIP Channel Link**:")
     await callback.answer()
     
 @dp.message(AdminEditState.waiting_for_link)
