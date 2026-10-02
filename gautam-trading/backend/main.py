@@ -26,15 +26,31 @@ except ImportError:
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     from bot.main import bot, dp
 
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Set the blue Menu button commands in Telegram
-    await bot.set_my_commands([
-        BotCommand(command="start", description="Start the bot"),
-        BotCommand(command="admin", description="Admin Dashboard")
-    ])
+    # Set default commands for everyone
+    await bot.set_my_commands(
+        [BotCommand(command="start", description="Start the bot")],
+        scope=BotCommandScopeDefault()
+    )
+    
+    # Set admin commands for admins
+    admin_ids = settings.admin_telegram_ids.split(",")
+    for aid in admin_ids:
+        if aid.strip():
+            try:
+                await bot.set_my_commands(
+                    [
+                        BotCommand(command="start", description="Start the bot"),
+                        BotCommand(command="admin", description="Admin Dashboard")
+                    ],
+                    scope=BotCommandScopeChat(chat_id=aid.strip())
+                )
+            except Exception:
+                pass
+
     # Start the bot polling in the background
     asyncio.create_task(dp.start_polling(bot))
     yield

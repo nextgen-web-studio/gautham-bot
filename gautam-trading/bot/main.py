@@ -161,7 +161,9 @@ async def admin_reject(callback: types.CallbackQuery):
 # ================= ADMIN DASHBOARD =================
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
-    if str(message.from_user.id) not in os.getenv("ADMIN_TELEGRAM_IDS", "").split(","): return
+    if str(message.from_user.id) not in os.getenv("ADMIN_TELEGRAM_IDS", "").split(","):
+        await message.answer("❌ This command is not accessible. You do not have admin permissions.")
+        return
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 Broadcast Message", callback_data="admin_broadcast")],
