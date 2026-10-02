@@ -3,9 +3,10 @@ import os
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from supabase import create_client, Client
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 load_dotenv()
 
@@ -17,219 +18,203 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-def get_main_menu():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐ Reviews", callback_data="menu_reviews")],
-        [InlineKeyboardButton(text="📊 About Us", callback_data="menu_about")],
-        [InlineKeyboardButton(text="🔗 Get Started", callback_data="menu_affiliate")],
-        [InlineKeyboardButton(text="💬 Support", callback_data="menu_support")]
-    ])
+# ================= STATES =================
+class RegState(StatesGroup):
+    waiting_for_quotex_id = State()
 
+class AdminEditState(StatesGroup):
+    waiting_for_link = State()
+    waiting_for_review_image = State()
+
+class BroadcastState(StatesGroup):
+    waiting_for_message = State()
+
+# ================= USER FLOW =================
 @dp.message(CommandStart())
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
     telegram_id = str(message.from_user.id)
     username = message.from_user.username
     first_name = message.from_user.first_name
     last_name = message.from_user.last_name
     
-    # Check if user exists
+    # 1. Upsert User
     user_res = supabase.table("users").select("*").eq("telegram_id", telegram_id).execute()
-    
     if not user_res.data:
-        # Extract source if passed e.g. /start ad_campaign_123
-        source = None
-        parts = message.text.split(" ")
-        if len(parts) > 1:
-            source = parts[1]
-            
         supabase.table("users").insert({
             "telegram_id": telegram_id,
             "username": username,
             "first_name": first_name,
             "last_name": last_name,
-            "source": source,
+            "source": "organic",
             "status": "active"
         }).execute()
     else:
-        # Update active time
         supabase.table("users").update({"status": "active"}).eq("telegram_id", telegram_id).execute()
 
-    welcome_msg = (
-        "👋 Welcome to Gautam Trading!\n\n"
-        "Thanks for joining us. 😊\n\n"
-        "Here you can:\n"
-        "📊 Learn more about our trading community\n"
-        "⭐ Check user reviews\n"
-        "🔗 Access our recommended platform\n"
-        "📢 Receive important updates\n\n"
-        "Choose an option below 👇"
-    )
-    await message.answer(welcome_msg, reply_markup=get_main_menu())
-
-@dp.callback_query(F.data == "menu_about")
-async def show_about(callback: types.CallbackQuery):
-    about_text = (
-        "📊 About Gautam Trading\n\n"
-        "Gautam Trading provides trading-related information, educational content, "
-        "community updates and access to a recommended trading platform.\n\n"
-        "Trading involves financial risk. Please understand the risks and terms "
-        "of any platform before using it."
-    )
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⭐ Reviews", callback_data="menu_reviews")],
-        [InlineKeyboardButton(text="🔗 Get Started", callback_data="menu_affiliate")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")]
-    ])
-    await callback.message.edit_text(about_text, reply_markup=markup)
-    await callback.answer()
-
-@dp.callback_query(F.data == "menu_back")
-async def go_back(callback: types.CallbackQuery):
-    welcome_msg = (
-        "👋 Welcome to Gautam Trading!\n\n"
-        "Thanks for joining us. 😊\n\n"
-        "Choose an option below 👇"
-    )
-    await callback.message.edit_text(welcome_msg, reply_markup=get_main_menu())
-    await callback.answer()
-
-@dp.callback_query(F.data == "menu_affiliate")
-async def show_affiliate(callback: types.CallbackQuery):
-    telegram_id = str(callback.from_user.id)
+    # 2. Sequential Messages
+    await message.answer("👋 Welcome to Gautam Trading!\n\nWe're excited to have you here.")
+    await asyncio.sleep(1)
     
-    # Track the click
-    supabase.table("affiliate_clicks").insert({
-        "telegram_id": telegram_id
-    }).execute()
+    # 3. Reviews (Images)
+    try:
+        reviews_res = supabase.table("review_images").select("file_id").execute()
+        if reviews_res.data:
+            media_group = [InputMediaPhoto(media=r['file_id']) for r in reviews_res.data[:10]]
+            if media_group:
+                await message.answer_media_group(media=media_group)
+            await asyncio.sleep(1)
+    except Exception as e:
+        print("Error sending reviews:", e)
+        
+    # 4. Public Channel
+    settings_res = supabase.table("bot_settings").select("*").execute()
+    settings_dict = {s['setting_key']: s['setting_value'] for s in settings_res.data}
+    pub_link = settings_dict.get("public_channel_link", "https://t.me/GautamTrading")
+    await message.answer(f"📢 Join our Free Public Channel for daily updates:\n{pub_link}")
+    await asyncio.sleep(1)
     
-    # Fetch affiliate URL from settings, or fallback to env
-    settings_res = supabase.table("bot_settings").select("setting_value").eq("setting_key", "affiliate_url").execute()
-    affiliate_url = os.getenv("AFFILIATE_URL", "https://example.com/trading")
-    if settings_res.data:
-        affiliate_url = settings_res.data[0].get("setting_value", affiliate_url)
-    
-    disclosure_msg = (
-        "🔗 Get Started\n\n"
-        "You can access the recommended platform using the link below.\n\n"
-        "ℹ️ This is an affiliate link. Gautam Trading may receive a commission if you register through this link.\n\n"
-        "Trading involves risk. Please understand the platform and associated risks before depositing or trading.\n\n"
-        "👇 Continue:"
-    )
+    # 5. Quotex Affiliate
+    aff_link = settings_dict.get("affiliate_url", "https://quotex.com")
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔗 Open Platform", url=affiliate_url)],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")]
+        [InlineKeyboardButton(text="✅ I Have Registered", callback_data="btn_registered")]
     ])
-    await callback.message.edit_text(disclosure_msg, reply_markup=markup)
+    await message.answer(
+        f"🚀 To get VIP Access, you MUST register using our official Quotex link:\n\n{aff_link}\n\nOnce you have registered, click the button below!",
+        reply_markup=markup,
+        disable_web_page_preview=True
+    )
+
+@dp.callback_query(F.data == "btn_registered")
+async def btn_registered(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("📝 Please enter your Quotex ID below:")
+    await state.set_state(RegState.waiting_for_quotex_id)
     await callback.answer()
 
-@dp.callback_query(F.data == "menu_support")
-async def show_support(callback: types.CallbackQuery, state: FSMContext = None):
-    # For a real implementation, we would use FSM to catch the next message
-    # For now, we will just prompt the user
-    support_msg = (
-        "💬 Support\n\n"
-        "Send your question below and our support team will review it.\n\n"
-        "Please type your message (start with /ask followed by your question):"
-    )
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")]
-    ])
-    await callback.message.edit_text(support_msg, reply_markup=markup)
-    await callback.answer()
-
-@dp.message(F.text.startswith("/ask "))
-async def handle_support_message(message: types.Message):
-    question = message.text.replace("/ask ", "", 1)
+@dp.message(RegState.waiting_for_quotex_id)
+async def process_quotex_id(message: types.Message, state: FSMContext):
+    quotex_id = message.text.strip()
     telegram_id = str(message.from_user.id)
     
-    supabase.table("messages").insert({
-        "telegram_id": telegram_id,
-        "direction": "inbound",
-        "message": question,
-        "message_type": "text"
-    }).execute()
+    # Update DB
+    supabase.table("users").update({
+        "quotex_id": quotex_id,
+        "approval_status": "pending"
+    }).eq("telegram_id", telegram_id).execute()
     
-    await message.answer("✅ Your message has been received.\n\nOur support team will review it and reply when possible.")
-
-@dp.callback_query(F.data == "menu_reviews")
-async def show_reviews(callback: types.CallbackQuery):
-    reviews_res = supabase.table("reviews").select("*").eq("active", True).limit(3).execute()
+    await message.answer("✅ Your Quotex ID has been submitted and is currently under review by our admin. Please wait.")
+    await state.clear()
     
-    if not reviews_res.data:
-        msg = "⭐ No reviews available yet."
-    else:
-        msg = "⭐ Gautam Trading Reviews\n\nHere are some experiences shared by our users.\n\n"
-        for r in reviews_res.data:
-            msg += f"**{r.get('title')}**\n{r.get('content')}\n\n"
-        msg += "⚠️ User experiences are individual and do not guarantee future results."
-        
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔗 Get Started", callback_data="menu_affiliate")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")]
-    ])
-    await callback.message.edit_text(msg, reply_markup=markup)
-    await callback.answer()
+    # Notify Admins
+    admin_ids = os.getenv("ADMIN_TELEGRAM_IDS", "").split(",")
+    for aid in admin_ids:
+        if not aid.strip(): continue
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Approve", callback_data=f"approve_{telegram_id}")],
+            [InlineKeyboardButton(text="❌ Reject", callback_data=f"reject_{telegram_id}")]
+        ])
+        try:
+            await bot.send_message(
+                chat_id=aid.strip(), 
+                text=f"🔔 *New Registration!*\n\nUser: {message.from_user.full_name} (@{message.from_user.username or 'none'})\nQuotex ID: `{quotex_id}`",
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
+        except Exception as e:
+            print("Failed to notify admin:", e)
 
+# ================= ADMIN REGISTRATION CONTROLS =================
+@dp.callback_query(F.data.startswith("approve_"))
+async def admin_approve(callback: types.CallbackQuery):
+    if str(callback.from_user.id) not in os.getenv("ADMIN_TELEGRAM_IDS", "").split(","): return
+    user_id = callback.data.split("_")[1]
+    
+    supabase.table("users").update({"approval_status": "approved"}).eq("telegram_id", user_id).execute()
+    
+    try:
+        await callback.message.edit_text(callback.message.text + "\n\n✅ **APPROVED**", parse_mode="Markdown")
+        await bot.send_message(user_id, "🎉 Congratulations! Your Quotex ID has been approved. Welcome to the VIP Team!")
+    except: pass
+    await callback.answer("User Approved")
+
+@dp.callback_query(F.data.startswith("reject_"))
+async def admin_reject(callback: types.CallbackQuery):
+    if str(callback.from_user.id) not in os.getenv("ADMIN_TELEGRAM_IDS", "").split(","): return
+    user_id = callback.data.split("_")[1]
+    
+    supabase.table("users").update({"approval_status": "rejected"}).eq("telegram_id", user_id).execute()
+    
+    try:
+        await callback.message.edit_text(callback.message.text + "\n\n❌ **REJECTED**", parse_mode="Markdown")
+        await bot.send_message(user_id, "❌ Your Quotex ID was rejected. Please ensure you registered correctly with our link, deposited the minimum amount, and try again.")
+    except: pass
+    await callback.answer("User Rejected")
+
+# ================= ADMIN DASHBOARD =================
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
-    telegram_id = str(message.from_user.id)
-    admin_ids = os.getenv("ADMIN_TELEGRAM_IDS", "").split(",")
-    
-    if telegram_id not in admin_ids:
-        return
-        
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📈 View Stats", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 Broadcast", callback_data="admin_broadcast")]
-    ])
-    await message.answer("🔒 **Admin Dashboard**\n\nSelect an option below:", reply_markup=markup, parse_mode="Markdown")
-
-@dp.callback_query(F.data == "admin_stats")
-async def admin_stats(callback: types.CallbackQuery):
-    telegram_id = str(callback.from_user.id)
-    if telegram_id not in os.getenv("ADMIN_TELEGRAM_IDS", "").split(","):
-        return
-
-    users_res = supabase.table("users").select("id", count="exact").execute()
-    clicks_res = supabase.table("affiliate_clicks").select("id", count="exact").execute()
-    
-    total_users = users_res.count if hasattr(users_res, 'count') else 0
-    total_clicks = clicks_res.count if hasattr(clicks_res, 'count') else 0
-    
-    stats_msg = (
-        "📈 **Gautam Trading Stats**\n\n"
-        f"👥 Total Users: {total_users}\n"
-        f"🔗 Total Affiliate Clicks: {total_clicks}\n"
-    )
+    if str(message.from_user.id) not in os.getenv("ADMIN_TELEGRAM_IDS", "").split(","): return
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="admin_back")]
+        [InlineKeyboardButton(text="📢 Broadcast Message", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="🔗 Edit Affiliate Link", callback_data="edit_affiliate")],
+        [InlineKeyboardButton(text="📢 Edit Public Channel Link", callback_data="edit_public")],
+        [InlineKeyboardButton(text="📸 Add Review Image", callback_data="add_review_img")],
+        [InlineKeyboardButton(text="🗑️ Clear All Reviews", callback_data="clear_reviews")]
     ])
-    await callback.message.edit_text(stats_msg, reply_markup=markup, parse_mode="Markdown")
+    await message.answer("🛠 **Gautam Trading Admin Dashboard**", reply_markup=markup, parse_mode="Markdown")
+
+# Edit Links
+@dp.callback_query(F.data == "edit_affiliate")
+async def edit_aff(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminEditState.waiting_for_link)
+    await state.update_data(setting_key="affiliate_url")
+    await callback.message.answer("🔗 Please send the new **Quotex Affiliate Link**:")
     await callback.answer()
 
-@dp.callback_query(F.data == "admin_back")
-async def admin_back(callback: types.CallbackQuery):
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📈 View Stats", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 Broadcast", callback_data="admin_broadcast")]
-    ])
-    await callback.message.edit_text("🔒 **Admin Dashboard**\n\nSelect an option below:", reply_markup=markup, parse_mode="Markdown")
+@dp.callback_query(F.data == "edit_public")
+async def edit_pub(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminEditState.waiting_for_link)
+    await state.update_data(setting_key="public_channel_link")
+    await callback.message.answer("📢 Please send the new **Public Channel Link**:")
+    await callback.answer()
+    
+@dp.message(AdminEditState.waiting_for_link)
+async def process_link_edit(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    key = data['setting_key']
+    
+    supabase.table("bot_settings").upsert({"setting_key": key, "setting_value": message.text.strip()}).execute()
+    
+    await message.answer(f"✅ Link updated successfully!")
+    await state.clear()
+
+# Reviews
+@dp.callback_query(F.data == "add_review_img")
+async def add_rev_img(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdminEditState.waiting_for_review_image)
+    await callback.message.answer("📸 Please send a **photo** to add as a review:")
+    await callback.answer()
+    
+@dp.message(AdminEditState.waiting_for_review_image, F.photo)
+async def process_rev_img(message: types.Message, state: FSMContext):
+    file_id = message.photo[-1].file_id
+    supabase.table("review_images").insert({"file_id": file_id}).execute()
+    await message.answer("✅ Review image added successfully!")
+    await state.clear()
+    
+@dp.callback_query(F.data == "clear_reviews")
+async def clear_revs(callback: types.CallbackQuery):
+    # PostgREST needs a filter to delete, we delete everything not equal to 'none'
+    supabase.table("review_images").delete().neq("file_id", "none").execute()
+    await callback.message.answer("🗑️ All review images have been deleted!")
     await callback.answer()
 
-from aiogram.fsm.state import State, StatesGroup
-
-class BroadcastState(StatesGroup):
-    waiting_for_message = State()
-
+# Broadcast
 @dp.callback_query(F.data == "admin_broadcast")
 async def admin_broadcast(callback: types.CallbackQuery, state: FSMContext):
-    telegram_id = str(callback.from_user.id)
-    if telegram_id not in os.getenv("ADMIN_TELEGRAM_IDS", "").split(","):
-        return
-        
     await state.set_state(BroadcastState.waiting_for_message)
-    await callback.message.edit_text("📢 **Broadcast Mode**\n\nPlease send the message you want to broadcast to all users. (Or type /cancel to abort)", parse_mode="Markdown")
+    await callback.message.answer("📢 **Broadcast Mode**\n\nPlease send the message you want to blast to all users. (Or type /cancel to abort)", parse_mode="Markdown")
     await callback.answer()
 
 @dp.message(BroadcastState.waiting_for_message)
@@ -239,10 +224,9 @@ async def process_broadcast(message: types.Message, state: FSMContext):
         await message.answer("Broadcast cancelled.")
         return
         
-    await message.answer("⏳ Sending broadcast...")
+    await message.answer("🚀 Sending broadcast...")
     await state.clear()
     
-    # Get all users
     users_res = supabase.table("users").select("telegram_id").execute()
     users = users_res.data
     
@@ -251,12 +235,13 @@ async def process_broadcast(message: types.Message, state: FSMContext):
     
     for u in users:
         try:
+            # We can broadcast text, we should ideally handle photo/video too but for now text
             await bot.send_message(chat_id=u["telegram_id"], text=message.text)
             success += 1
+            await asyncio.sleep(0.05) # Prevent spam limits
         except Exception:
             failed += 1
             
-    # Save broadcast stats
     supabase.table("broadcasts").insert({
         "message": message.text,
         "status": "completed",
@@ -267,6 +252,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
     
     await message.answer(f"✅ **Broadcast Complete!**\n\nSuccessful: {success}\nFailed: {failed}", parse_mode="Markdown")
 
+# ================= RUNNER =================
 async def main():
     print("Starting bot...")
     await dp.start_polling(bot)
