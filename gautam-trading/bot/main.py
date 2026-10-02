@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaVideo
 from supabase import create_client, Client
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -56,14 +56,22 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await message.answer("👋 Welcome to Gautam Trading!\n\nWe're excited to have you here.")
     await asyncio.sleep(1)
     
-    # 3. Reviews (Images)
+    # 3. Reviews (Images & Videos)
     try:
-        reviews_res = supabase.table("review_images").select("file_id").execute()
+        reviews_res = supabase.table("review_images").select("*").execute()
         if reviews_res.data:
-            media_group = [InputMediaPhoto(media=r['file_id']) for r in reviews_res.data[:10]]
+            media_group = []
+            for r in reviews_res.data[:10]:
+                mtype = r.get('media_type', 'photo')
+                if mtype == 'video':
+                    media_group.append(InputMediaVideo(media=r['file_id']))
+                else:
+                    media_group.append(InputMediaPhoto(media=r['file_id']))
             if media_group:
                 await message.answer_media_group(media=media_group)
-            await asyncio.sleep(1)
+                await asyncio.sleep(1)
+                await message.answer("⭐️ **These are some of the amazing results from our VIP clients!**", parse_mode="Markdown")
+                await asyncio.sleep(1)
     except Exception as e:
         print("Error sending reviews:", e)
         
@@ -193,14 +201,20 @@ async def process_link_edit(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "add_review_img")
 async def add_rev_img(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminEditState.waiting_for_review_image)
-    await callback.message.answer("📸 Please send a **photo** to add as a review:")
+    await callback.message.answer("📸 Please send a **photo or video** to add as a review:")
     await callback.answer()
     
-@dp.message(AdminEditState.waiting_for_review_image, F.photo)
+@dp.message(AdminEditState.waiting_for_review_image, F.photo | F.video)
 async def process_rev_img(message: types.Message, state: FSMContext):
-    file_id = message.photo[-1].file_id
-    supabase.table("review_images").insert({"file_id": file_id}).execute()
-    await message.answer("✅ Review image added successfully!")
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        mtype = 'photo'
+    else:
+        file_id = message.video.file_id
+        mtype = 'video'
+        
+    supabase.table("review_images").insert({"file_id": file_id, "media_type": mtype}).execute()
+    await message.answer("✅ Review media added successfully!")
     await state.clear()
     
 @dp.callback_query(F.data == "clear_reviews")
